@@ -17,8 +17,7 @@ class TripletEmbedding(object):
     """
 
     def __init__(self, n_entity, n_relation, entity_factors, relation_factors,
-                 hidden_units, lambda_w=10e-3, sigma=1.0, activation_func="relu",
-                 optimizer="adam", learning_rate=10e-2, w_regularization=10e-4):
+                 hidden_units, lambda_w=10e-3, sigma=1.0, activation_func="relu", optimizer="adam", learning_rate=10e-2, w_regularization=10e-4):
         """
         :param n_entity: the number of vocabrary of entities
         :param n_relation: the number of vocabrary of entities
@@ -142,6 +141,20 @@ class TripletEmbedding(object):
                 self._weights.append(w)
                 self._biases.append(b)
         return output
+
+
+    def get_entity_embedding(self, indices):
+        return self.sess.run(self._entity_embed)[indices, :]
+
+    def get_relation_embedding(self, indices):
+        return self.sess.run(self._relation_embed)[indices, :]
+
+    def get_estimated_embedding(self, subjects, objects):
+        subjects = np.array(subjects, dtype=np.int64)
+        objects = np.array(objects, dtype=np.int64)
+        feed_dict = {self._subjects: subjects, self._objects: objects}
+        res = self.sess.run(self._estimated_embed, feed_dict=feed_dict)
+        return res
 
 
 
