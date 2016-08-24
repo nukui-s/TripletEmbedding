@@ -47,7 +47,8 @@ class TripletEmbedding(object):
         self.optimizer = OPTIMIZER_NAME[optimizer]
         self.build()
 
-    def fit(self, subjects, objects, predicates, labels, batch_size=128):
+    def fit(self, subjects, objects, predicates, labels, batch_size=128,
+            nb_epoch=10):
         subjects = np.array(subjects, dtype=np.int64)
         objects = np.array(objects, dtype=np.int64)
         predicates = np.array(predicates, dtype=np.int64)
@@ -55,16 +56,23 @@ class TripletEmbedding(object):
         if not (subjects.size == objects.size ==
                 predicates.size == labels.size):
             raise ValueError("The shape of arguments to fit() is wrong")
-        num_loop = math.floor(subjects.size / batch_size)
-        for n in range(num_loop):
-            start = batch_size * n
-            stop = batch_size * (n + 1)
-            feed_dict = {self._subjects: subjects[start:stop],
-                         self._objects: objects[start:stop],
-                         self._predicates: predicates[start:stop],
-                         self._exist_labels: labels[start:stop]}
-            _, cost = self.sess.run([self.opt, self.cost], feed_dict=feed_dict)
-            logging.info("The {}th loop: cost = {}".format(n, cost))
+        for epoch in range(nb_epoch):
+            indices = np.arange(subjects.size)
+            np.random.shuffle(indices)
+            num_loop = math.floor(subjects.size / batch_size)
+            logging.info("-----------------------------------")
+            logging.info("The {}th epoch".format(epoch+1))
+            logging.info("-----------------------------------")
+            for n in range(num_loop):
+                start = batch_size * n
+                stop = batch_size * (n + 1)
+                batch_indices = indices[start:stop]
+                feed_dict = {self._subjects: subjects[batch_indices],
+                            self._objects: objects[batch_indices],
+                            self._predicates: predicates[batch_indices],
+                            self._exist_labels: labels[batch_indices]}
+                _, cost = self.sess.run([self.opt, self.cost], feed_dict=feed_dict)
+                logging.info("The {}th loop: cost = {}".format(n+1, cost))
         return cost
 
 
