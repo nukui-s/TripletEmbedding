@@ -60,9 +60,9 @@ class TripletEmbedding(object):
             indices = np.arange(subjects.size)
             np.random.shuffle(indices)
             num_loop = math.floor(subjects.size / batch_size)
-            logging.info("-----------------------------------")
-            logging.info("The {}th epoch".format(epoch+1))
-            logging.info("-----------------------------------")
+            print("-----------------------------------")
+            print("The {}th epoch".format(epoch+1))
+            print("-----------------------------------")
             for n in range(num_loop):
                 start = batch_size * n
                 stop = batch_size * (n + 1)
@@ -72,7 +72,7 @@ class TripletEmbedding(object):
                             self._predicates: predicates[batch_indices],
                             self._exist_labels: labels[batch_indices]}
                 _, cost = self.sess.run([self.opt, self.cost], feed_dict=feed_dict)
-                logging.info("The {}th loop: cost = {}".format(n+1, cost))
+                print("The {}th loop: cost = {}".format(n+1, cost))
         return cost
 
 
