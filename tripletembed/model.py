@@ -1,4 +1,4 @@
-# -*- utf-8 -*-
+# -*- coding: utf-8 -*-
 
 import math
 
@@ -17,7 +17,8 @@ class TripletEmbedding(object):
     """
 
     def __init__(self, n_entity, n_relation, entity_factors, relation_factors,
-                 hidden_units, lambda_w=10e-3, sigma=1.0, activation_func="relu", optimizer="adam", learning_rate=10e-2, w_regularization=10e-4):
+                 hidden_units, lambda_w=10e-3, sigma=1.0, activation_func="relu",
+                 optimizer="adam", learning_rate=10e-2, w_regularization=10e-4):
         """
         :param n_entity: the number of vocabrary of entities
         :param n_relation: the number of vocabrary of entities
@@ -48,7 +49,7 @@ class TripletEmbedding(object):
         self.build()
 
     def fit(self, subjects, objects, predicates, labels, batch_size=128,
-            nb_epoch=10):
+            nb_epoch=10, logdir="log"):
         subjects = np.array(subjects, dtype=np.int64)
         objects = np.array(objects, dtype=np.int64)
         predicates = np.array(predicates, dtype=np.int64)
@@ -56,6 +57,7 @@ class TripletEmbedding(object):
         if not (subjects.size == objects.size ==
                 predicates.size == labels.size):
             raise ValueError("The shape of arguments to fit() is wrong")
+        writer = tf.train.SummaryWriter(logdir)
         for epoch in range(nb_epoch):
             indices = np.arange(subjects.size)
             np.random.shuffle(indices)
@@ -71,7 +73,10 @@ class TripletEmbedding(object):
                             self._objects: objects[batch_indices],
                             self._predicates: predicates[batch_indices],
                             self._exist_labels: labels[batch_indices]}
-                _, cost = self.sess.run([self.opt, self.cost], feed_dict=feed_dict)
+                _, cost, sm = self.sess.run([self.opt, self.cost, self.summaries],
+                                            feed_dict=feed_dict)
+                if n%10 == 0:
+                    writer.add_summary(sm, n)
                 print("The {}th loop: cost = {}".format(n+1, cost))
         return cost
 
@@ -92,6 +97,9 @@ class TripletEmbedding(object):
                                                   shape=[self.n_relation, self.relation_factors],
                                                   dtype=tf.float32,
                                                   initializer=tf.random_uniform_initializer())
+            tf.histogram_summary("entity_embed", self._entity_embed)
+            tf.histogram_summary("relation_embed", self._relation_embed)
+
             # input nodes
             self._subjects = tf.placeholder(tf.int64, shape=[None], name="subjects")
             self._objects = tf.placeholder(tf.int64, shape=[None], name="objects")
@@ -113,9 +121,26 @@ class TripletEmbedding(object):
             l2_loss = tf.reduce_sum(tf.pow(predicate_embed - self._estimated_embed, 2),
                                     reduction_indices=1)
 
+            reg_term = tf.nn.l2_loss(subject_embed)
+            reg_term += tf.nn.l2_loss(object_embed)
+            reg_term += tf.nn.l2_loss(predicate_embed)
+            for w in self._weights:
+                reg_term += tf.nn.l2_loss(w)
+            for b in self._biases:
+                reg_term += tf.nn.l2_loss(b)
+
+            tf.histogram_summary("l2_loss", l2_loss)
+
             self.proba = proba = tf.exp(-self.sigma * l2_loss)
-            self.cost = cost = tf.reduce_sum(self.sigma * l2_loss - \
-                    (1/2) * (1 - self._exist_labels) * tf.log(tf.exp(self.sigma * l2_loss) - 1 + 10e-6))
+            cost = tf.reduce_sum(self.sigma * l2_loss - \
+                (1/2) * (1 - self._exist_labels) * tf.log(tf.exp(self.sigma * l2_loss) - 1 + 10e-6))
+
+            self.cost = cost + self.w_regularization * reg_term
+
+            tf.histogram_summary("proba", proba)
+            tf.scalar_summary("cost", cost)
+
+            self.summaries = tf.merge_all_summaries()
 
             optimizer = getattr(tf.train, self.optimizer)
             self.opt = optimizer(self.learning_rate).minimize(self.cost)
@@ -145,6 +170,8 @@ class TripletEmbedding(object):
                                     dtype=tf.float32,
                                     initializer=tf.truncated_normal_initializer())
                 b = tf.Variable(np.zeros(units[layer+1]), name="bias", dtype=tf.float32)
+                tf.histogram_summary("weight"+str(layer), w)
+                tf.histogram_summary("bias"+str(layer), b)
                 output = activation_func(tf.matmul(output, w) + b)
                 self._weights.append(w)
                 self._biases.append(b)
