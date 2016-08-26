@@ -18,7 +18,8 @@ class TripletEmbedding(object):
 
     def __init__(self, n_entity, n_relation, entity_factors, relation_factors,
                  hidden_units, lambda_w=10e-3, sigma=1.0, activation_func="relu",
-                 optimizer="adam", learning_rate=10e-2, w_regularization=10e-4):
+                 optimizer="adam", learning_rate=10e-2, w_regularization=10e-4,
+                 n_negative_sample=5):
         """
         :param n_entity: the number of vocabrary of entities
         :param n_relation: the number of vocabrary of entities
@@ -29,6 +30,7 @@ class TripletEmbedding(object):
         :param sigma: the parameter for sigmoid function
         :param activation_func: the name of activation function
         :param optimizer: the name of optimizer
+        :param n_nagative_sample: the number of negative samples per one positive
         """
         if not hasattr(tf.nn, activation_func):
             raise("TensorFlow has no such activation func"
@@ -46,18 +48,21 @@ class TripletEmbedding(object):
         self.relation_factors = relation_factors
         self.activation_func = activation_func
         self.optimizer = OPTIMIZER_NAME[optimizer]
+        self.n_negative_sample = n_negative_sample
         self.build()
 
-    def fit(self, subjects, objects, predicates, labels, batch_size=128,
+    def fit(self, subjects, objects, predicates, batch_size=128,
             nb_epoch=10, logdir="log"):
         subjects = np.array(subjects, dtype=np.int64)
         objects = np.array(objects, dtype=np.int64)
         predicates = np.array(predicates, dtype=np.int64)
-        labels = np.array(labels, dtype=np.float32)
-        if not (subjects.size == objects.size ==
-                predicates.size == labels.size):
+        if not (subjects.size == objects.size == predicates.size):
             raise ValueError("The shape of arguments to fit() is wrong")
+        # add negative sample with uniform distribution
+        samples = self.add_negative_samples(subjects, objects, predicates)
+        subjects, objects, predicates, labels = samples
         writer = tf.train.SummaryWriter(logdir)
+        cnt = 0
         for epoch in range(nb_epoch):
             indices = np.arange(subjects.size)
             np.random.shuffle(indices)
@@ -75,10 +80,33 @@ class TripletEmbedding(object):
                             self._exist_labels: labels[batch_indices]}
                 _, cost, sm = self.sess.run([self.opt, self.cost, self.summaries],
                                             feed_dict=feed_dict)
-                if n%10 == 0:
-                    writer.add_summary(sm, n)
-                print("The {}th loop: cost = {}".format(n+1, cost))
+                if cnt%100 == 0:
+                    writer.add_summary(sm, cnt)
+                    print("The {}th loop: cost = {}".format(cnt+1, cost))
+                cnt += 1
         return cost
+
+    def add_negative_samples(self, subjects, objects, predicates):
+        subjects_neg = []
+        objects_neg = []
+        predicate_neg = []
+        nn = self.n_negative_sample
+        for s, o, p in zip(subjects, objects, predicates):
+            subjects_neg += [s] * nn
+            objects_neg += [o] * nn
+            cnt = 0
+            while cnt < nn:
+                p_neg = np.random.randint(0, self.n_relation)
+                if p != p_neg:
+                    predicate_neg.append(p_neg)
+                    cnt += 1
+        num_pos = len(subjects)
+        num_neg = len(subjects_neg)
+        labels = np.array([1] * num_pos + [-1] * num_neg)
+        subjects_all = np.append(subjects, subjects_neg)
+        objects_all = np.append(objects, objects_neg)
+        predicate_all = np.append(predicates, predicate_neg)
+        return subjects_all, objects_all, predicate_all, labels
 
 
     def build(self):
@@ -89,14 +117,21 @@ class TripletEmbedding(object):
         with self.graph.as_default():
 
             # trainable variables
+            entity_scale = 1.0 / np.sqrt(self.entity_factors)
+            relation_scale = 1.0 / np.sqrt(self.relation_factors)
+
             self._entity_embed = tf.get_variable(name="entity_embed",
-                                                 shape=[self.n_entity, self.entity_factors],
-                                                 dtype=tf.float32,
-                                                 initializer=tf.random_uniform_initializer())
+                                        shape=[self.n_entity, self.entity_factors],
+                                        dtype=tf.float32,
+                                        initializer=tf.random_uniform_initializer(
+                                            minval= -entity_scale,
+                                            maxval= entity_scale))
             self._relation_embed = tf.get_variable(name="relation_embed",
                                                   shape=[self.n_relation, self.relation_factors],
                                                   dtype=tf.float32,
-                                                  initializer=tf.random_uniform_initializer())
+                                                  initializer=tf.random_uniform_initializer(
+                                                      minval= -relation_scale,
+                                                      maxval = relation_scale))
             tf.histogram_summary("entity_embed", self._entity_embed)
             tf.histogram_summary("relation_embed", self._relation_embed)
 
@@ -165,10 +200,11 @@ class TripletEmbedding(object):
         for layer in range(len(units)-1):
             # separate name scope for each layer to avoid name confilct
             with tf.variable_scope("hidden"+str(layer)):
+                w_scale = 1.0 / np.sqrt(units[layer] * units[layer+1])
                 w = tf.get_variable(name="weight",
                                     shape=[units[layer], units[layer+1]],
                                     dtype=tf.float32,
-                                    initializer=tf.truncated_normal_initializer())
+                                    initializer=tf.truncated_normal_initializer(stddev=w_scale))
                 b = tf.Variable(np.zeros(units[layer+1]), name="bias", dtype=tf.float32)
                 tf.histogram_summary("weight"+str(layer), w)
                 tf.histogram_summary("bias"+str(layer), b)
