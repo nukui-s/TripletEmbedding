@@ -6,6 +6,8 @@ import numpy as np
 import tensorflow as tf
 import logging
 
+import joblib
+
 
 OPTIMIZER_NAME = {"adam": "AdamOptimizer",
                   "sgd": "GradientDescentOptimizer"}
@@ -167,13 +169,17 @@ class TripletEmbedding(object):
             tf.histogram_summary("l2_loss", l2_loss)
 
             self.proba = proba = tf.exp(-self.sigma * l2_loss)
-            cost = tf.reduce_sum(self.sigma * l2_loss - \
+            loss = tf.reduce_sum(self.sigma * l2_loss - \
                 (1/2) * (1 - self._exist_labels) * tf.log(tf.exp(self.sigma * l2_loss) - 1 + 10e-6))
 
-            self.cost = cost + self.w_regularization * reg_term
+            self.cost = loss + self.w_regularization * reg_term
 
             tf.histogram_summary("proba", proba)
-            tf.scalar_summary("cost", cost)
+
+            tf.scalar_summary("loss", loss)
+            tf.scalar_summary("regularizer", reg_term)
+            tf.scalar_summary("regularizer_scaled", reg_term*self.w_regularization)
+            tf.scalar_summary("cost", self.cost)
 
             self.summaries = tf.merge_all_summaries()
 
@@ -214,11 +220,21 @@ class TripletEmbedding(object):
         return output
 
 
-    def get_entity_embedding(self, indices):
-        return self.sess.run(self._entity_embed)[indices, :]
+    def get_entity_embedding(self, indices=None):
+        entity_embed = self.sess.run(self._entity_embed)
+        if indices:
+            return entity_embed[indices, :]
+        else:
+            return entity_embed
 
-    def get_relation_embedding(self, indices):
-        return self.sess.run(self._relation_embed)[indices, :]
+    def get_relation_embedding(self, indices=None):
+        relation_embed = self._relation_embed)
+        if indices:
+            return relation_embed[indices, :]
+        else:
+            return relation_embed
+
+    def set_entity_embedding(self, entity_embed):
 
     def get_estimated_embedding(self, subjects, objects):
         subjects = np.array(subjects, dtype=np.int64)
@@ -227,5 +243,40 @@ class TripletEmbedding(object):
         res = self.sess.run(self._estimated_embed, feed_dict=feed_dict)
         return res
 
+    def save(self, save_file):
+        stored = {}
+        entity_embed = self.get_entity_embedding()
+        relation_embed = self.get_relation_embedding()
+        weights = self.get_weights()
+        biases = self.get_biases()
+        stored["entity_embed"] = entity_embed
+        stored["relation_embed"] = relation_embed
+        stored["weights"] = weights
+        stored["biases"] = biases
+
+        joblib.dump(stored, save_file)
+
+    @classmethod
+    def restore(cls, save_file):
+        stored = joblib.load(save_file)
+
+    def get_weights(self):
+        return [self.sess.run(w) for w in self._weights]
+
+    def get_biases(self):
+        return [self.sess.run(b) for b in self._biases]
+
+
+    def set_weights(self, weights):
+        for i, weight_i in enumerate(weights):
+            if weight_i.shape != self._weights[i].shape:
+                raise ValueError("The shape of weight in layer {}th is invalid".format(i))
+            self._weights[i] = weight_i
+
+    def set_biases(self, biases):
+        for i, bias_i in enumerate(biases)
+            if bias_i.shape != self._biases[i].shape:
+                raise ValueError("The shape of bias in layer {}th is invalid".format(i))
+            self._biases[i] = bias_i
 
 
